@@ -1,122 +1,69 @@
 #include "Touchscreen.h"
-
-#include <Arduino.h>
-#include <TouchScreen.h>
-
 #include "Config.h"
 
-namespace
-{
-    TouchScreen touchscreen(
-        TOUCH_XP_PIN,
-        TOUCH_YP_PIN,
-        TOUCH_XM_PIN,
-        TOUCH_YM_PIN,
-        TOUCH_RX_PLATE
-    );
+#include <Arduino.h>
+#include <Adafruit_TouchScreen.h>
 
-    float filteredX = 0.0f;
-    float filteredY = 0.0f;
-    bool filterInitialized = false;
-
-    float mapRawToPhysical(
-        int raw,
-        int rawMin,
-        int rawMax,
-        float physicalMin,
-        float physicalMax,
-        bool invert)
-    {
-        if (rawMax == rawMin)
-        {
-            return 0.0f;
-        }
-
-        float normalized =
-            (static_cast<float>(raw) - rawMin) /
-            static_cast<float>(rawMax - rawMin);
-
-        if (invert)
-        {
-            normalized = 1.0f - normalized;
-        }
-
-        return physicalMin +
-               normalized * (physicalMax - physicalMin);
-    }
-}
+// Adafruit TouchScreen constructor uses XP, YP, XM, YM.
+static Adafruit_TouchScreen touchscreen(
+    TOUCH_XP, TOUCH_YP, TOUCH_XM, TOUCH_YM, 300
+);
 
 void initializeTouchscreen()
 {
-    filteredX = 0.0f;
-    filteredY = 0.0f;
-    filterInitialized = false;
+    // The Adafruit library configures the pins dynamically while reading.
+}
+
+static float mapFloat(
+    float value,
+    float inMin,
+    float inMax,
+    float outMin,
+    float outMax
+)
+{
+    return (value - inMin) * (outMax - outMin) /
+           (inMax - inMin) + outMin;
 }
 
 BallPosition getBallPosition()
 {
-    TSPoint point = touchscreen.getPoint();
+    BallPosition result{0.0f, 0.0f, false};
 
-    BallPosition result{};
-    result.valid = false;
+    TSPoint p = touchscreen.getPoint();
 
-    if (point.z < TOUCH_MIN_PRESSURE)
-    {
+    // Adafruit TouchScreen returns pressure Z. The exact threshold
+    // depends on your hardware and should be experimentally adjusted.
+    if (p.z <= 0)
         return result;
-    }
 
-    float x_mm = mapRawToPhysical(
-        point.x,
-        TOUCH_RAW_X_MIN,
-        TOUCH_RAW_X_MAX,
-        -PLATE_WIDTH_MM / 2.0f,
-        +PLATE_WIDTH_MM / 2.0f,
-        TOUCH_INVERT_X
+    float x = mapFloat(
+        static_cast<float>(p.x),
+        TOUCH_MIN_X,
+        TOUCH_MAX_X,
+        -1.0f,
+        1.0f
     );
 
-    float y_mm = mapRawToPhysical(
-        point.y,
-        TOUCH_RAW_Y_MIN,
-        TOUCH_RAW_Y_MAX,
-        -PLATE_HEIGHT_MM / 2.0f,
-        +PLATE_HEIGHT_MM / 2.0f,
-        TOUCH_INVERT_Y
+    float y = mapFloat(
+        static_cast<float>(p.y),
+        TOUCH_MIN_Y,
+        TOUCH_MAX_Y,
+        -1.0f,
+        1.0f
     );
 
-    if (!filterInitialized)
-    {
-        filteredX = x_mm;
-        filteredY = y_mm;
-        filterInitialized = true;
-    }
-    else
-    {
-        filteredX =
-            TOUCH_FILTER_ALPHA * x_mm +
-            (1.0f - TOUCH_FILTER_ALPHA) * filteredX;
+    if (TOUCH_REVERSE_X)
+        x = -x;
 
-        filteredY =
-            TOUCH_FILTER_ALPHA * y_mm +
-            (1.0f - TOUCH_FILTER_ALPHA) * filteredY;
-    }
+    if (TOUCH_REVERSE_Y)
+        y = -y;
 
-    result.x_mm = filteredX;
-    result.y_mm = filteredY;
+    // Convert normalized coordinates to millimeters.
+    // This uses PLATFORM_RADIUS as a temporary workspace scale.
+    result.x_mm = x * PLATFORM_RADIUS_MM;
+    result.y_mm = y * PLATFORM_RADIUS_MM;
     result.valid = true;
 
     return result;
-}
-
-void printRawTouchscreenData()
-{
-    TSPoint point = touchscreen.getPoint();
-
-    Serial.print("Raw X: ");
-    Serial.print(point.x);
-
-    Serial.print(" | Raw Y: ");
-    Serial.print(point.y);
-
-    Serial.print(" | Raw Z: ");
-    Serial.println(point.z);
 }

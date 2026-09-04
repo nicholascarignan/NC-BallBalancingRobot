@@ -1,5 +1,7 @@
-\.pio/
+# PlatformIO
+.pio/
+.piolibdeps/
 .vscode/
+.vscode/settings.json
 *.pyc
 __pycache__/
-.DS_Store

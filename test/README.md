@@ -1,13 +1,13 @@
-# Test programs
+# Testing
 
-This directory is reserved for hardware bring-up tests.
+Initial hardware/software testing should be done manually through the
+serial monitor.
 
-Recommended first tests:
+Recommended order:
 
-1. Touchscreen raw-coordinate test
-2. Individual servo test
-3. Three-servo neutral-position test
-4. Platform pitch/roll mapping test
-5. Full PID test
-
-The production application remains `src/main.cpp`.
+1. Touchscreen coordinate test.
+2. Servo 1/2/3 individual movement test.
+3. Servo center/limit test.
+4. Platform tilt direction test.
+5. PID disabled / gains = 0.
+6. Low-gain PID testing.

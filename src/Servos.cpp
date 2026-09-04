@@ -1,41 +1,16 @@
 #include "Servos.h"
+#include "Config.h"
 
 #include <Arduino.h>
 #include <Servo.h>
 
-#include "Config.h"
+static Servo servo1;
+static Servo servo2;
+static Servo servo3;
 
-namespace
+static float constrainAngle(float angle)
 {
-    Servo servo1;
-    Servo servo2;
-    Servo servo3;
-
-    float clampAngle(float angle)
-    {
-        if (angle < SERVO_MIN_DEG)
-        {
-            return SERVO_MIN_DEG;
-        }
-
-        if (angle > SERVO_MAX_DEG)
-        {
-            return SERVO_MAX_DEG;
-        }
-
-        return angle;
-    }
-
-    float applyCalibration(
-        float requestedAngle,
-        float center,
-        float direction)
-    {
-        float calibrated =
-            center + direction * requestedAngle;
-
-        return clampAngle(calibrated);
-    }
+    return constrain(angle, SERVO_MIN_ANGLE, SERVO_MAX_ANGLE);
 }
 
 void initializeServos()
@@ -44,47 +19,38 @@ void initializeServos()
     servo2.attach(SERVO_2_PIN);
     servo3.attach(SERVO_3_PIN);
 
-    centerServos();
+    setServo1(SERVO_1_CENTER);
+    setServo2(SERVO_2_CENTER);
+    setServo3(SERVO_3_CENTER);
 }
 
-void setServoAngles(const ServoCommand& command)
+void setServo1(float angle)
 {
-    float angle1 = applyCalibration(
-        command.servo1_deg,
-        SERVO_1_CENTER_DEG,
-        SERVO_1_DIRECTION
-    );
+    angle = SERVO_1_CENTER +
+            (angle - SERVO_1_CENTER) * SERVO_1_DIRECTION;
 
-    float angle2 = applyCalibration(
-        command.servo2_deg,
-        SERVO_2_CENTER_DEG,
-        SERVO_2_DIRECTION
-    );
-
-    float angle3 = applyCalibration(
-        command.servo3_deg,
-        SERVO_3_CENTER_DEG,
-        SERVO_3_DIRECTION
-    );
-
-    servo1.write(static_cast<int>(angle1));
-    servo2.write(static_cast<int>(angle2));
-    servo3.write(static_cast<int>(angle3));
+    servo1.write(static_cast<int>(constrainAngle(angle)));
 }
 
-void centerServos()
+void setServo2(float angle)
 {
-    ServoCommand command{};
-    command.servo1_deg = 0.0f;
-    command.servo2_deg = 0.0f;
-    command.servo3_deg = 0.0f;
+    angle = SERVO_2_CENTER +
+            (angle - SERVO_2_CENTER) * SERVO_2_DIRECTION;
 
-    setServoAngles(command);
+    servo2.write(static_cast<int>(constrainAngle(angle)));
 }
 
-void detachServos()
+void setServo3(float angle)
 {
-    servo1.detach();
-    servo2.detach();
-    servo3.detach();
+    angle = SERVO_3_CENTER +
+            (angle - SERVO_3_CENTER) * SERVO_3_DIRECTION;
+
+    servo3.write(static_cast<int>(constrainAngle(angle)));
+}
+
+void setServoAngles(const ServoAngles& angles)
+{
+    setServo1(angles.servo1);
+    setServo2(angles.servo2);
+    setServo3(angles.servo3);
 }

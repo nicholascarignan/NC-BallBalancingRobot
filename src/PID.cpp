@@ -1,94 +1,62 @@
 #include "PID.h"
+#include "Config.h"
 
 #include <Arduino.h>
 #include <PID_v1.h>
-
 #include <math.h>
 
-#include "Config.h"
+static double inputX = 0.0;
+static double outputX = 0.0;
+static double setpointX = TARGET_X_MM;
 
-namespace
-{
-    double inputX = 0.0;
-    double outputX = 0.0;
-    double setpointX = TARGET_X_MM;
+static double inputY = 0.0;
+static double outputY = 0.0;
+static double setpointY = TARGET_Y_MM;
 
-    double inputY = 0.0;
-    double outputY = 0.0;
-    double setpointY = TARGET_Y_MM;
+static PID pidX(
+    &inputX,
+    &outputX,
+    &setpointX,
+    PID_X_KP,
+    PID_X_KI,
+    PID_X_KD,
+    DIRECT
+);
 
-    PID pidX(
-        &inputX,
-        &outputX,
-        &setpointX,
-        PID_X_KP,
-        PID_X_KI,
-        PID_X_KD,
-        PID_X_DIRECTION
-    );
-
-    PID pidY(
-        &inputY,
-        &outputY,
-        &setpointY,
-        PID_Y_KP,
-        PID_Y_KI,
-        PID_Y_KD,
-        PID_Y_DIRECTION
-    );
-
-    float degToRad(float degrees)
-    {
-        return degrees * PI / 180.0f;
-    }
-
-    float clampTilt(float value)
-    {
-        if (value > MAX_PLATFORM_TILT_DEG)
-        {
-            return MAX_PLATFORM_TILT_DEG;
-        }
-
-        if (value < -MAX_PLATFORM_TILT_DEG)
-        {
-            return -MAX_PLATFORM_TILT_DEG;
-        }
-
-        return value;
-    }
-}
+static PID pidY(
+    &inputY,
+    &outputY,
+    &setpointY,
+    PID_Y_KP,
+    PID_Y_KI,
+    PID_Y_KD,
+    DIRECT
+);
 
 void initializePID()
 {
-    pidX.SetOutputLimits(PID_OUTPUT_MIN, PID_OUTPUT_MAX);
-    pidY.SetOutputLimits(PID_OUTPUT_MIN, PID_OUTPUT_MAX);
-
-    /*
-     * The PID library handles its own sample timing.
-     * The outer robot loop is currently 50 Hz.
-     */
-    pidX.SetSampleTime(
-        static_cast<int>(CONTROL_PERIOD_US / 1000UL)
+    pidX.SetOutputLimits(
+        -MAX_PLATFORM_TILT_DEG,
+        MAX_PLATFORM_TILT_DEG
     );
 
-    pidY.SetSampleTime(
-        static_cast<int>(CONTROL_PERIOD_US / 1000UL)
+    pidY.SetOutputLimits(
+        -MAX_PLATFORM_TILT_DEG,
+        MAX_PLATFORM_TILT_DEG
     );
 
     pidX.SetMode(AUTOMATIC);
     pidY.SetMode(AUTOMATIC);
-
-    resetPID();
 }
 
-PlatformTilt updatePID(const BallPosition& ball)
+PlatformOrientation calculatePlatformOrientation(
+    const BallPosition& ball
+)
 {
-    PlatformTilt result{};
+    PlatformOrientation orientation{0.0f, 0.0f};
 
     if (!ball.valid)
-    {
-        return result;
-    }
+        return orientation;
 
     inputX = ball.x_mm;
     inputY = ball.y_mm;
@@ -96,68 +64,50 @@ PlatformTilt updatePID(const BallPosition& ball)
     pidX.Compute();
     pidY.Compute();
 
-    result.pitch_deg = clampTilt(static_cast<float>(outputX));
-    result.roll_deg = clampTilt(static_cast<float>(outputY));
+    // NOTE:
+    // The sign convention must be experimentally verified.
+    // If the platform moves the ball in the wrong direction,
+    // either reverse the PID direction or the corresponding axis.
+    orientation.pitch_deg = static_cast<float>(outputX);
+    orientation.roll_deg  = static_cast<float>(outputY);
+
+    return orientation;
+}
+
+ServoAngles calculateServoAngles(
+    const PlatformOrientation& orientation
+)
+{
+    ServoAngles result{
+        SERVO_1_CENTER,
+        SERVO_2_CENTER,
+        SERVO_3_CENTER
+    };
+
+    // --------------------------------------------------------
+    // INITIAL LINEARIZED 3-SERVO MAPPING
+    // --------------------------------------------------------
+    //
+    // This is NOT the final inverse kinematics.
+    // It exists so the software architecture can be tested.
+    //
+    // For a proper 3-arm platform, these equations need to be
+    // derived from the actual arm/link/platform geometry.
+    //
+    const float pitch = orientation.pitch_deg;
+    const float roll  = orientation.roll_deg;
+
+    constexpr float SQRT3_OVER_2 = 0.8660254f;
+
+    float command1 = roll;
+    float command2 =
+        -0.5f * roll + SQRT3_OVER_2 * pitch;
+    float command3 =
+        -0.5f * roll - SQRT3_OVER_2 * pitch;
+
+    result.servo1 = SERVO_1_CENTER + command1;
+    result.servo2 = SERVO_2_CENTER + command2;
+    result.servo3 = SERVO_3_CENTER + command3;
 
     return result;
-}
-
-ServoCommand platformTiltToServoAngles(
-    const PlatformTilt& tilt)
-{
-    ServoCommand command{};
-
-    /*
-     * INITIAL LINEARIZED 3-SERVO MODEL
-     *
-     * For actuator i at azimuth theta:
-     *
-     *   actuator contribution ≈
-     *       pitch * cos(theta)
-     *     + roll  * sin(theta)
-     *
-     * This is NOT the final inverse kinematics.
-     *
-     * Replace this section with the actual geometric IK after you
-     * measure the platform radius, servo-arm length, linkage length,
-     * horn orientation, joint locations, and servo zero positions.
-     */
-
-    const float theta1 = degToRad(SERVO_1_AZIMUTH_DEG);
-    const float theta2 = degToRad(SERVO_2_AZIMUTH_DEG);
-    const float theta3 = degToRad(SERVO_3_AZIMUTH_DEG);
-
-    command.servo1_deg =
-        SERVO_TILT_GAIN_DEG *
-        (tilt.pitch_deg * cos(theta1) +
-         tilt.roll_deg  * sin(theta1));
-
-    command.servo2_deg =
-        SERVO_TILT_GAIN_DEG *
-        (tilt.pitch_deg * cos(theta2) +
-         tilt.roll_deg  * sin(theta2));
-
-    command.servo3_deg =
-        SERVO_TILT_GAIN_DEG *
-        (tilt.pitch_deg * cos(theta3) +
-         tilt.roll_deg  * sin(theta3));
-
-    return command;
-}
-
-void resetPID()
-{
-    /*
-     * The public PID library does not expose an explicit "clear
-     * integral" operation. Reinitializing the controllers by switching
-     * to manual and back to automatic resets their internal state.
-     */
-    pidX.SetMode(MANUAL);
-    pidY.SetMode(MANUAL);
-
-    outputX = 0.0;
-    outputY = 0.0;
-
-    pidX.SetMode(AUTOMATIC);
-    pidY.SetMode(AUTOMATIC);
 }
